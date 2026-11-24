@@ -22,7 +22,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -57,19 +56,9 @@ class MainActivity : ComponentActivity() {
 fun Doodle(modifier: Modifier = Modifier) {
     val defaultPrompt = "請在畫布區手寫，再按「開始辨識」按鈕"
     var recognizedText by remember { mutableStateOf(defaultPrompt) }
-    var strokeCount by remember { mutableIntStateOf(0) }
 
-    // 建立一個路徑物件（使用 apply 簡化）
-    var path by remember {
-        mutableStateOf(
-            Path().apply {
-                moveTo(50f, 100f) // 移動到起始點 (50f, 100f)
-                lineTo(200f, 500f) // 畫一條線到 (200f, 500f)
-                lineTo(450f, 400f) // 畫一條線到 (450f, 400f)
-                close() // 閉合路徑
-            }
-        )
-    }
+    // 修改初始路徑：建立一個空白路徑物件
+    var path by remember { mutableStateOf(Path()) }
 
     // ML Kit 墨水與筆劃收集器 ----------
     // inkBuilder 負責收集「整頁的全部筆劃」（把多個單一筆劃組合在一起）。
@@ -100,8 +89,13 @@ fun Doodle(modifier: Modifier = Modifier) {
                             // 按下：記錄 Path 起點
                             val x = offset.x
                             val y = offset.y
+                            val t = System.currentTimeMillis() // 時間戳記
+
                             path.moveTo(x, y)
+
+                            // ML Kit Ink.Stroke.Builder 紀錄起點
                             strokeBuilder = Ink.Stroke.builder()
+                            strokeBuilder?.addPoint(Ink.Point.create(x, y, t))
                         },
                         onDrag = { change, _ -> /* 手指移動 */
                             // 消費拖曳事件（避免影響父層元件手勢）
@@ -111,6 +105,7 @@ fun Doodle(modifier: Modifier = Modifier) {
                             // 移動：拉線並加入點座標
                             val x = change.position.x
                             val y = change.position.y
+                            val t = System.currentTimeMillis()
                             path.lineTo(x, y)
 
                             // 複製出一個內容一模一樣、但記憶體位址全新的 Path 物件
@@ -118,13 +113,18 @@ fun Doodle(modifier: Modifier = Modifier) {
                             val tempPath = Path()
                             tempPath.addPath(path)
                             path = tempPath
+
+                            // ML Kit 紀錄移動點座標
+                            strokeBuilder?.addPoint(Ink.Point.create(x, y, t))
                         },
                         onDragEnd = { /* 手指離開 */
-                            strokeBuilder?.let { builder ->
-                                inkBuilder.addStroke(builder.build())
+                            // 手指離開：將打包好的 Stroke 加入 inkBuilder
+                            strokeBuilder?.build()?.let { stroke ->
+                                inkBuilder.addStroke(stroke)
                             }
+
+                            // 重置當前 Stroke Builder 準備下一筆劃
                             strokeBuilder = null
-                            strokeCount++
                         }
                     )
                 }
@@ -140,14 +140,16 @@ fun Doodle(modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 開始辨識
             Button(
                 onClick = {
-                    recognizedText = if (strokeCount == 0) {
-                        "尚未偵測到筆畫，請先在畫布區手寫"
-                    } else {
-                        "已記錄 $strokeCount 筆手寫軌跡（待串接辨識模型）"
+                    val ink = inkBuilder.build() // 包含全部手寫軌跡的「欲辨識內容」
+
+                    if (ink.strokes.isEmpty()) {
+                        recognizedText = "請先書寫內容"
+                        return@Button
                     }
+
+                    recognizedText = "正在處理中..."
                 }
             ) {
                 Text("開始辨識")
@@ -155,14 +157,14 @@ fun Doodle(modifier: Modifier = Modifier) {
 
             Spacer(modifier = Modifier.width(16.dp))
 
-            // 清除畫布
             Button(
                 onClick = {
-                    path = Path()
+                    path = Path() // 指派新物件位址，立刻觸發 Canvas 重繪並清空畫面
+
+                    // 清除 ML Kit 累積的筆畫資料
                     inkBuilder = Ink.builder()
                     strokeBuilder = null
-                    strokeCount = 0
-                    recognizedText = defaultPrompt
+                    recognizedText = "請在畫布區手寫，再按「開始辨識」按鈕"
                 }
             ) {
                 Text("清除")
