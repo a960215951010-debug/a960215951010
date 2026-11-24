@@ -33,6 +33,12 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.common.model.RemoteModelManager
+import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognition
+import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognitionModel
+import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognitionModelIdentifier
+import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognizerOptions
 import com.google.mlkit.vision.digitalink.recognition.Ink
 import tw.edu.pu.csim.timmy.digitalink.ui.theme.DigitalInkTheme
 
@@ -69,6 +75,26 @@ fun Doodle(modifier: Modifier = Modifier) {
 
     var strokeBuilder by remember {
         mutableStateOf<Ink.Stroke.Builder?>(null)
+    }
+
+    // 記憶 ML Kit 模型與 Recognizer 實體（繁體中文 zh-Hant）----------
+    // 取得語言辨識碼
+    val modelIdentifier = remember {
+        try {
+            DigitalInkRecognitionModelIdentifier.fromLanguageTag("zh-Hant")
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // 建立語言模型物件
+    val model = remember(modelIdentifier) {
+        modelIdentifier?.let { DigitalInkRecognitionModel.builder(it).build() }
+    }
+
+    // 建立手寫辨識引擎
+    val recognizer = remember(model) {
+        model?.let { DigitalInkRecognition.getClient(DigitalInkRecognizerOptions.builder(it).build()) }
     }
 
     Column(
@@ -150,6 +176,30 @@ fun Doodle(modifier: Modifier = Modifier) {
                     }
 
                     recognizedText = "正在處理中..."
+
+                    if (model != null) {
+                        RemoteModelManager.getInstance()
+                            .download(model, DownloadConditions.Builder().build())
+                            .addOnSuccessListener {
+                                recognizer?.recognize(ink)
+                                    ?.addOnSuccessListener { result ->
+                                        if (result.candidates.isNotEmpty()) {
+                                            val topCandidate = result.candidates[0].text
+                                            recognizedText = "辨識結果: $topCandidate"
+                                        } else {
+                                            recognizedText = "辨識結果: 無法辨識"
+                                        }
+                                    }
+                                    ?.addOnFailureListener {
+                                        recognizedText = "辨識失敗: ${it.message}"
+                                    }
+                            }
+                            .addOnFailureListener {
+                                recognizedText = "模型下載失敗"
+                            }
+                    } else {
+                        recognizedText = "模型建立失敗"
+                    }
                 }
             ) {
                 Text("開始辨識")
