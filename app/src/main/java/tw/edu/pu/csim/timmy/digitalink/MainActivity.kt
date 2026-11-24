@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import com.google.mlkit.vision.digitalink.recognition.Ink
 import tw.edu.pu.csim.timmy.digitalink.ui.theme.DigitalInkTheme
 
 class MainActivity : ComponentActivity() {
@@ -70,6 +71,17 @@ fun Doodle(modifier: Modifier = Modifier) {
         )
     }
 
+    // ML Kit 墨水與筆劃收集器 ----------
+    // inkBuilder 負責收集「整頁的全部筆劃」（把多個單一筆劃組合在一起）。
+    // strokeBuilder 負責記錄「單一筆劃」（手指從按下到抬起，抬起後就歸零）。
+    var inkBuilder by remember {
+        mutableStateOf(Ink.builder())
+    }
+
+    var strokeBuilder by remember {
+        mutableStateOf<Ink.Stroke.Builder?>(null)
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -89,6 +101,7 @@ fun Doodle(modifier: Modifier = Modifier) {
                             val x = offset.x
                             val y = offset.y
                             path.moveTo(x, y)
+                            strokeBuilder = Ink.Stroke.builder()
                         },
                         onDrag = { change, _ -> /* 手指移動 */
                             // 消費拖曳事件（避免影響父層元件手勢）
@@ -107,6 +120,10 @@ fun Doodle(modifier: Modifier = Modifier) {
                             path = tempPath
                         },
                         onDragEnd = { /* 手指離開 */
+                            strokeBuilder?.let { builder ->
+                                inkBuilder.addStroke(builder.build())
+                            }
+                            strokeBuilder = null
                             strokeCount++
                         }
                     )
@@ -142,6 +159,8 @@ fun Doodle(modifier: Modifier = Modifier) {
             Button(
                 onClick = {
                     path = Path()
+                    inkBuilder = Ink.builder()
+                    strokeBuilder = null
                     strokeCount = 0
                     recognizedText = defaultPrompt
                 }
